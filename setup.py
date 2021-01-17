@@ -20,6 +20,7 @@
 #  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 import os
+import re
 from os.path import dirname, abspath
 
 import setuptools
@@ -32,11 +33,15 @@ os.chdir(dirname(abspath(__file__)))
 with open("README.md", encoding="utf-8") as f:
     long_description = f.read()
 
+with open("requirements.txt", "r") as f:
+    requirements = re.findall(r"^\s*(.*?)\s*$", f.read(), re.MULTILINE)
+
 setup(
     name="pathmod",
     version=pathmod.__version__,
     packages=setuptools.find_packages(),
     python_requires="~=3.6",
+    install_requires=requirements,
     description="CLI tool for easily modifying the PATH (persistently) on Windows.",
     long_description=long_description,
     long_description_content_type="text/markdown",

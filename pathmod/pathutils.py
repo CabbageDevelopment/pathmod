@@ -20,7 +20,6 @@
 #  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 import os
-import platform
 import re
 import subprocess
 import sys
@@ -28,18 +27,48 @@ import traceback
 from os.path import abspath, expandvars, expanduser
 from typing import List
 
-from pathmod.argparsing import args
-
-if platform.system() != "Windows":
-    print(f"Sorry, we only support Windows at the moment.")
-    sys.exit(1)
-
-sys_print = print
+from pathmod.refresh import print_command
 
 
-def print(*args, quiet=None, **kwargs):
-    if not quiet:
-        sys_print(*args, **kwargs)
+def modify_path(
+    target: str, prepend: bool, remove: bool, dry_run: bool, system: bool, force: bool
+):
+    target = get_abs_path(target)
+
+    if os.path.isfile(target):
+        print(f"'{target}' is a file; using its parent folder instead.")
+        target = os.path.dirname(target)
+
+    if not force and not os.path.exists(target) and not remove:
+        print(
+            f"Error: location '{target}' does not exist. "
+            f"Re-run with the '--force' parameter if you still wish to add to the PATH."
+        )
+        sys.exit(1)
+
+    if not remove:
+        print(f"Adding '{target}' to the {'system' if system else 'user'} PATH...")
+
+    command = get_command(
+        target, system=system, force=force, prepend=prepend, remove=remove
+    )
+    if dry_run:
+        print(f"\nThis is the command we'll run:\n")
+        print(command)
+    else:
+        try:
+            run_command(command)
+            print(f"\nPATH updated persistently. ", end="")
+            print_command(newline_before=False)
+        except subprocess.CalledProcessError as e:
+            traceback.print_exc()
+
+            hashes = 20 * "#"
+            print(
+                f"\n{hashes} ERROR {hashes}\n\n"
+                f"There was an error running the command. ",
+                end="\n",
+            )
 
 
 def get_abs_path(path: str) -> str:
@@ -92,18 +121,18 @@ def run_command(command: str):
     return subprocess.check_output(command).decode("utf-8").replace("\r", "").rstrip()
 
 
-def get_command(target: str, user: bool, process=False) -> str:
+def get_command(
+    target: str, system: bool, prepend: bool, force: bool, remove: bool, process=False
+) -> str:
     """
     Returns the Powershell command which will add the new item to the path.
     """
-    path_cmd = powershell_command_get_path(user)
+    path_cmd = powershell_command_get_path(not system)
     path_cmd_stdout = run_command(path_cmd)
 
     path = re.findall(r"^\s*(.*)\s*$", path_cmd_stdout)[0]
 
-    if not (args.force or args.remove) and any(
-        item == target for item in path.split(";")
-    ):
+    if not (force or remove) and any(item == target for item in path.split(";")):
         print(f"Error: '{target}' is already on the PATH.")
         sys.exit(1)
 
@@ -111,17 +140,17 @@ def get_command(target: str, user: bool, process=False) -> str:
     if not re.match(r".*;\s*$", path):
         path = f"{path};"
 
-    if args.remove:
-        path = remove_from_path_str(path, target)
+    if remove:
+        path = remove_from_path_str(path, target, system=system)
     else:
-        path = add_to_path_str(path, target, prepend=args.prepend)
+        path = add_to_path_str(path, target, prepend=prepend)
 
     # Ensure path does not end in semicolon or backslash.
     path = re.findall(r"^(.*?)\\?;?\s*$", path)[0]
 
     set_cmd = (
         f'powershell.exe /c "[System.Environment]::'
-        f'SetEnvironmentVariable("""PATH""", """{path}""", {_get_environment_var_target(user, process)})"'
+        f'SetEnvironmentVariable("""PATH""", """{path}""", {_get_environment_var_target(not system, process)})"'
     )
 
     return set_cmd
@@ -154,7 +183,7 @@ def add_to_path_str(path: str, target: str, prepend: bool) -> str:
     return path
 
 
-def remove_from_path_str(path: str, to_remove: str) -> str:
+def remove_from_path_str(path: str, to_remove: str, system: bool) -> str:
     current_items = path.split(";")
     matches = []
 
@@ -168,7 +197,7 @@ def remove_from_path_str(path: str, to_remove: str) -> str:
 
     if not matches:
         print(
-            f"Error: '{to_remove}' not found on the {'system' if args.system else 'user'} PATH."
+            f"Error: '{to_remove}' not found on the {'system' if system else 'user'} PATH."
         )
         sys.exit(1)
 
@@ -178,109 +207,6 @@ def remove_from_path_str(path: str, to_remove: str) -> str:
             new_items.append(item)
 
     for i in matches:
-        print(f"Removing '{i}' from the {'system' if args.system else 'user'} PATH")
+        print(f"Removing '{i}' from the {'system' if system else 'user'} PATH")
 
     return ";".join(new_items)
-
-
-for p in args.path:
-    target = get_abs_path(p)
-    if os.path.isfile(target):
-        target = os.path.dirname(target)
-        print(f"'{target}' is a file; using its parent folder instead.")
-
-    if not args.force and not os.path.exists(target) and not args.remove:
-        print(
-            f"Error: location '{target}' does not exist. "
-            f"Re-run with the '--force' parameter if you still wish to add to the PATH."
-        )
-        sys.exit(1)
-
-    if not args.remove:
-        print(f"Adding '{target}' to the {'system' if args.system else 'user'} PATH...")
-
-    command = get_command(target, user=not args.system)
-    if args.dry_run:
-        print(f"\nThis is the command we'll run:\n")
-        print(command)
-    else:
-        try:
-            run_command(command)
-            print(
-                f"\nPATH updated persistently. "
-                f"To refresh the PATH in the current Powershell session, "
-                f"run the command:\n\n"
-                f"Invoke-Expression $(pathmod -g -pso)",
-                end="\n\n",
-            )
-        except subprocess.CalledProcessError as e:
-            traceback.print_exc()
-
-            hashes = 20 * "#"
-            print(
-                f"\n{hashes} ERROR {hashes}\n\n"
-                f"There was an error running the command. ",
-                end="\n",
-            )
-            if args.system:
-                print(
-                    f"Are you in an elevated shell? "
-                    f"You need admin permissions to change the system PATH."
-                )
-if args.show:
-    items = get_current_path(user=not args.system)
-    print(
-        f"\nCurrent items on the {'user' if not args.system else 'system'} PATH:",
-        end="\n\n",
-    )
-
-    for i in items:
-        print(f"'{i}'")
-
-if args.generate_script:
-    script_only = args.print_script_only
-    print(
-        f"Creating Powershell script to update the PATH in the current session...",
-        quiet=script_only,
-    )
-
-    cmd = (
-        f'$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + '
-        f'[System.Environment]::GetEnvironmentVariable("Path","User")\n'
-        f'Write-Output "Updated PATH in current session."\n'
-        f"rm $PSCommandPath"
-    )
-
-    filename = "Update-Path.ps1"
-
-    for i in range(2):
-        try:
-            if os.path.exists(filename):
-                if script_only:
-                    break
-
-                print(f"Error: script already exists. Will not overwrite.")
-                sys.exit(1)
-            with open(filename, "w") as f:
-                f.write(cmd)
-                break
-        except PermissionError:
-            print(
-                f"Don't have write permissions in '{os.getcwd()}', falling back to home directory.",
-                quiet=script_only,
-            )
-            filename = os.path.join(os.path.expanduser("~"), filename)
-
-    script_command = f".\\{os.path.relpath(filename)}"
-
-    if not script_only:
-        print(
-            f"\nSelf-deleting Powershell script generated. "
-            f"Execute the script with the command:\n\n{script_command}",
-            end="\n\n",
-        )
-    else:
-        print(script_command)
-
-if not (args.show or args.generate_script or args.path):
-    print(f"Nothing to do.")

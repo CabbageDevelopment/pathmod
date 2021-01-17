@@ -19,17 +19,19 @@
 #  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 #  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
-import platform
-import sys
+import click
 
-__version__ = "0.1.0"
-
-if platform.system() != "Windows":
-    print(f"Sorry, we only support Windows at the moment.")
-    sys.exit(1)
+from pathmod import __version__
 
 
-def cli():
-    from pathmod.cli import root
+@click.group()
+def root():
+    pass
 
-    root()
+
+@root.command("version", help="Show pathmod version")
+def version():
+    print(f"v{__version__}")
+
+
+import pathmod.cli.commands

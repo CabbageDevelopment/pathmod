@@ -24,4 +24,6 @@ Allows the program to be executed with "python -m pathmod".
 """
 
 if __name__ == "__main__":
-    from pathmod import main
+    from pathmod.cli import root
+
+    root()
